@@ -1,0 +1,185 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(ggplot2) # for drawing
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+require(gridExtra)
+library(grid)
+
+library(GGally)
+
+standardize <- function(x) {(x-mean(x))/sd(x)}
+```
+
+
+
+```{r}
+# write.csv(new.phosphor,"new.phosphor.csv", row.names = T)
+new.phosphor <- read.csv("new.phosphor.csv", header = T)
+dim(new.phosphor)
+head(new.phosphor)
+
+par(mfrow=c(1,1))
+ggpairs(new.phosphor[,c(1,3,4,2)], columns = 2:4,
+        diag = list(continuous = "blankDiag"),
+        upper = list(continuous = wrap("cor", size = 10)),
+        axisLabels = "internal")
+
+summary(new.phosphor)
+
+boxplot(new.phosphor$day30)
+boxplot(new.phosphor$DGT)
+boxplot(new.phosphor$olsenP)
+
+boxplot(standardize(new.phosphor$day30), standardize(new.phosphor$DGT), standardize(new.phosphor$olsenP))
+
+a = data.frame(name = "day30", value = standardize(new.phosphor$day30))
+b = data.frame(name = "olsenP", value = standardize(new.phosphor$olsenP))
+c = data.frame(name = "DGT", value = standardize(new.phosphor$DGT))
+bp_data = rbind(a,b,c)
+
+ggplot(bp_data, aes(x = name, y = value, fill = name)) + geom_boxplot() +ggtitle("Standardized data") +
+  theme(plot.title = element_text(hjust = 0.5)) + theme(legend.text = element_text(size=15))+theme(legend.position = "left") +theme(legend.key.size = unit(1, 'cm'))
+
+```
+
+
+Fitting models
+```{r}
+
+phos.model.DGT <- nls(day30 ~ alfa * DGT/(beta + DGT) , data = new.phosphor,
+start = list(alfa = 90 , beta = 1))
+summary(phos.model.DGT)
+
+phos.model.olsenP <- nls(day30 ~ alfa * olsenP/(beta + olsenP) , data = new.phosphor,
+start = list(alfa = 90 , beta = 1))
+summary(phos.model.olsenP)
+
+
+par(mfrow=c(1,2))
+
+stat_function(fun = function(x) {coef(phos.model.DGT)[1]*x/(coef(phos.model.DGT)[2]+x)}, alpha = 0.3, color = "blue")
+
+
+
+p1 = ggplot(new.phosphor, 
+            aes(x = olsenP, y= day30))+ 
+            geom_point() +
+            stat_function(fun = function(x) {coef(phos.model.olsenP)[1]*x/(coef(phos.model.olsenP)[2]+x)},
+            color = "red")
+
+p2 = ggplot(new.phosphor, 
+            aes(x = DGT, y= day30)) + 
+            geom_point() +
+            stat_function(fun = function(x) {coef(phos.model.DGT)[1]*x/(coef(phos.model.DGT)[2]+x)}, color = "blue")
+
+grid.arrange(p2, p1, ncol=2, top =textGrob("Michaelis-Menten models using DGT or olsenP",gp=gpar(fontsize=16,font=3)))
+
+```
+
+```{r}
+SSE_DGT    = 0
+SSE_olsenP = 0
+
+DGT_SEs = c()
+olsenP_SEs = c()
+
+# plot(new.phosphor$DGT, new.phosphor$day30)
+colours = c("red","blue")
+
+a = c()
+b = c()
+c = c()
+d = c()
+
+new.phosphor.cut = new.phosphor[-5,]
+for (i in 1:8){
+  test.split  = new.phosphor.cut[i,]
+  train.split = new.phosphor.cut[-i,]
+  
+  phos.model.DGT <- nls(day30 ~ alfa * DGT/(beta + DGT) , data = train.split,
+  start = list(alfa = 90 , beta = 1))
+
+  phos.model.olsenP <- nls(day30 ~ alfa * olsenP/(beta + olsenP) , data = train.split,
+  start = list(alfa = 90 , beta = 1))
+  
+  y        = test.split$day30
+  y_DGT    = predict(phos.model.DGT,test.split)
+  y_olsenP = predict(phos.model.olsenP,test.split)
+  
+  DGT_SE = (y - y_DGT)^2
+  olsenP_SE = (y - y_olsenP)^2
+  
+  DGT_SEs = append(DGT_SEs, DGT_SE)
+  olsenP_SEs = append(olsenP_SEs,olsenP_SE)
+  
+  
+  SSE_DGT     = SSE_DGT + DGT_SE 
+  SSE_olsenP  = SSE_olsenP + olsenP_SE
+  
+  a = append(a, coef(phos.model.DGT)[1])
+  b = append(b, coef(phos.model.DGT)[2])
+  
+  c = append(c, coef(phos.model.olsenP)[1])
+  d = append(d, coef(phos.model.olsenP)[2])
+}
+
+p1 = ggplot(new.phosphor.cut, 
+            aes(x = DGT, y= day30))+ 
+            geom_point()+
+            ggtitle("Models from crossvalidating on DGT")+
+            theme(plot.title = element_text(hjust = 0.5))+
+            stat_function(fun = function(x) {a[1]*x/(b[1]+x)}, alpha = 0.3, color = "blue")+ 
+            stat_function(fun = function(x) {a[2]*x/(b[2]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[3]*x/(b[3]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[4]*x/(b[4]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[5]*x/(b[5]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[6]*x/(b[6]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[7]*x/(b[7]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[8]*x/(b[8]+x)}, alpha = 0.3, color = "blue")+
+            stat_function(fun = function(x) {a[9]*x/(b[9]+x)}, alpha = 0.3, color = "blue")
+
+p2 = ggplot(new.phosphor.cut, 
+            aes(x = olsenP, y= day30))+ 
+            geom_point()+ 
+            ggtitle("Models from crossvalidating on olsenP without outlier")+
+            theme(plot.title = element_text(hjust = 0.5))+
+            stat_function(fun = function(x) {c[1]*x/(d[1]+x)}, alpha = 0.3, color = "red")+ 
+            stat_function(fun = function(x) {c[2]*x/(d[2]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[3]*x/(d[3]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[4]*x/(d[4]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[5]*x/(d[5]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[6]*x/(d[6]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[7]*x/(d[7]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[8]*x/(d[8]+x)}, alpha = 0.3, color = "red")+
+            stat_function(fun = function(x) {c[9]*x/(d[9]+x)}, alpha = 0.3, color = "red")
+
+MSE_DGT    = SSE_DGT/8
+MSE_olsenP = SSE_olsenP/8
+```
+
+Testing normality assumption:
+```{r}
+par(mfrow=c(1,2))
+qqnorm(sqrt(DGT_SEs), main = "QQ-plot for DGT model", col = "blue")
+qqline(sqrt(DGT_SEs))
+
+qqnorm(sqrt(olsenP_SEs), main = "QQ-plot for olsenP model", col = "red")
+qqline(sqrt(olsenP_SEs))
+```
+
+
+
+```{r}
+wilcox.test(DGT_SEs, olsenP_SEs, paired = T)
+
+t.test(DGT_SEs, olsenP_SEs)
+```
+
+
